@@ -1,0 +1,54 @@
+監督式分類器：XGBoost
+
+* 在完整訓練集上訓練 XGBoost 分類器。
+
+```python
+xgb = XGBClassifier(
+    n_estimators=100,
+    random_state=RANDOM_SEED,
+    use_label_encoder=False,
+    eval_metric="logloss"
+)
+xgb.fit(X_train, y_train)
+```
+
+無監督異常偵測：IsolationForest
+
+1. **contamination**：告訴模型預期異常比例，候選值由 `cont_list` 決定 (e.g. 0.1%、0.2%、0.5%、1%)。
+2. 僅用「非詐欺」樣本擬合模型 (`iso.fit(X_train[y_train==0])`)。
+3. 對測試集計算 `decision_function` 分數（取負號使分數越高越異常）。
+
+```python
+iso = IsolationForest(contamination=cont, random_state=RANDOM_SEED)
+iso.fit(X_train[y_train==0])
+scores = -iso.decision_function(X_test)
+```
+
+閾值搜尋：percentile
+
+* 在每個 `contamination` 下，對 `scores` 掃描不同的 percentile 閾值 (e.g. 99%、99.5%、99.8%、99.9%)。
+* 將分數高於閾值的樣本視為「可疑詐欺」，再丟給 XGBoost 做最終分類。
+* 以 F1-score 作為搜尋指標，記錄最佳 `(contamination, percentile, threshold)`。
+
+```python
+for pct in percentile_list:
+    thr = np.percentile(scores, pct)
+    mask_anom = (scores >= thr)
+    y_pred = np.zeros_like(y_test)
+    y_pred[mask_anom] = xgb.predict(X_test[mask_anom])
+    f1 = f1_score(y_test, y_pred)
+    # 保留 F1 最大的配置
+```
+
+最終評估
+
+* 以最佳配置重新標記測試集。
+* 列印 `classification_report`、`confusion_matrix`，並計算 `ROC AUC`。
+
+```python
+print(classification_report(y_test, y_pred, digits=4))
+print(confusion_matrix(y_test, y_pred))
+print(f"ROC AUC: {roc_auc_score(y_test, y_prob):.4f}")
+```
+
+
